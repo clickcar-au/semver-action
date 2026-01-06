@@ -18,6 +18,7 @@ async function main () {
   const fromTag = core.getInput('fromTag')
   const maxTagsToFetch = _.toSafeInteger(core.getInput('maxTagsToFetch') || 10)
   const fetchLimit = (maxTagsToFetch < 1 || maxTagsToFetch > 100) ? 10 : maxTagsToFetch
+  const filterPath = core.getInput('filterPath') || ''
 
   const bumpTypes = {
     major: core.getInput('majorList').split(',').map(p => p.trim()).filter(p => p),
@@ -198,7 +199,40 @@ async function main () {
     commits.push(...additionalCommits)
   }
 
-  if (!commits || commits.length < 1) {
+  // Filter commits by path if filterPath is set
+  let filteredCommits = commits
+  if (filterPath) {
+    core.info(`Filtering commits by path: ${filterPath}`)
+    const matchingCommits = []
+    for (const commit of commits) {
+      if (typeof commit === 'string') {
+        matchingCommits.push(commit)
+        continue
+      }
+      try {
+        const commitData = await gh.rest.repos.getCommit({
+          owner,
+          repo,
+          ref: commit.sha
+        })
+        const files = _.get(commitData, 'data.files', [])
+        const matchesPath = files.some(file => file.filename.startsWith(filterPath))
+        if (matchesPath) {
+          core.info(`[PATH MATCH] Commit ${commit.sha} touches files under ${filterPath}`)
+          matchingCommits.push(commit)
+        } else {
+          core.info(`[PATH SKIP] Commit ${commit.sha} does not touch files under ${filterPath}`)
+        }
+      } catch (err) {
+        core.warning(`Failed to fetch files for commit ${commit.sha}: ${err.message}`)
+        matchingCommits.push(commit)
+      }
+    }
+    filteredCommits = matchingCommits
+    core.info(`${filteredCommits.length} of ${commits.length} commits match the filter path`)
+  }
+
+  if (!filteredCommits || filteredCommits.length < 1) {
     switch (noNewCommitBehavior) {
       case 'current': {
         core.info(`Couldn't find any commits between branch HEAD and latest tag. Exiting with current as next version...`)
@@ -222,7 +256,7 @@ async function main () {
   const majorChanges = []
   const minorChanges = []
   const patchChanges = []
-  for (const commit of commits) {
+  for (const commit of filteredCommits) {
     try {
       const cAst = cc.toConventionalChangelogFormat(cc.parser(commit.commit.message))
       if (bumpTypes.major.includes(cAst.type)) {

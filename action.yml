@@ -52,6 +52,10 @@ inputs:
     description: Maximum number of tags to fetch from latest.
     required: false
     default: '10'
+  filterPath:
+    description: Only consider commits that touch files under this path (e.g. `src/services/my-service/`). If not set, all commits are considered.
+    required: false
+    default: ''
 outputs:
   current:
     description: Current version number / latest tag.
